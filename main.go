@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"github.com/Shopify/sarama"
+	goliblogger "github.com/feitianlove/golib/common/logger"
 	ftK "github.com/feitianlove/golib/kafka"
 	"github.com/feitianlove/logtransfers/config"
 	"github.com/feitianlove/logtransfers/kafka"
-	"strconv"
+	"github.com/feitianlove/logtransfers/logger"
+	"github.com/sirupsen/logrus"
 	"sync"
 	"time"
 )
@@ -14,11 +16,22 @@ import (
 //TODO golib 中初始化kafka变成 string
 func main() {
 	var wg sync.WaitGroup
-	cfg, err := config.NewConfig("./etc/logtransfer.conf")
+	cfg, err := config.NewConfig("../etc/logtransfer.conf")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("config init success: %+v", cfg.Kafka)
+
+	//初始化logger
+	err = logger.InitCtrlLog(&goliblogger.LogConf{
+		LogLevel:      "info",
+		LogPath:       "../log/logtransfer",
+		LogReserveDay: 7,
+		ReportCaller:  false,
+	})
+	if err != nil {
+		panic(err)
+	}
 	kconfig := ftK.Kafka{ServerAddr: cfg.Kafka.Address}
 	produce, err := kafka.InitProduct(kconfig)
 	if err != nil {
@@ -37,9 +50,17 @@ func main() {
 				Partition: int32(i % 3),
 			})
 			if err != nil {
-				fmt.Printf("第 %d 个消息生产失败\n", i)
+				logger.Ctrl.WithFields(logrus.Fields{
+					"Partition": int32(i % 3),
+					"topic":     cfg.Kafka.WebTopic,
+					"Value":     fmt.Sprintf("第 %d 个消息生产失败", i),
+				}).Info("product message")
 			} else {
-				fmt.Printf("第 %d 个消息生产成功\n", i)
+				logger.Ctrl.WithFields(logrus.Fields{
+					"Partition": int32(i % 3),
+					"topic":     cfg.Kafka.WebTopic,
+					"Value":     fmt.Sprintf("第 %d 个消息生产成功", i),
+				}).Info("SendMessage")
 			}
 			time.Sleep(time.Second)
 		}
@@ -55,11 +76,10 @@ func main() {
 	wg.Wait()
 }
 func KafkacallBack(message *sarama.ConsumerMessage) {
-	data := map[string]string{
-		"Partition": strconv.Itoa(int(message.Partition)),
-		"Offset":    strconv.Itoa(int(message.Offset)),
+	logger.Ctrl.WithFields(logrus.Fields{
+		"Partition": message.Partition,
+		"Offset":    message.Offset,
 		"Key":       string(message.Key),
 		"Value":     string(message.Value),
-	}
-	fmt.Printf("%+v", data)
+	}).Info("RecvMessage")
 }
